@@ -2,13 +2,15 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
-
+#include <cstdlib>
+#include <ctime>
 #include "circle.h"
 
 struct Entity {
     glm::vec2 pos;
     glm::vec2 size;
 };
+
 
 //define window dimensions
 constexpr int WINDOW_WIDTH{640};
@@ -46,11 +48,99 @@ Square player;
 std::vector<Square> enemies; // Lista de inamici
 std::vector<Circle> bullets;
 
+std::vector<Circle> enemyBullets; // Lista de ouă
+float eggTimer = 0.0f; // Cronometru intern
+constexpr float EGG_SPAWN_TIME = 1.0f; // Trage un ou la fiecare 1 secundă
+constexpr float EGG_SPEED = 300.0f; // Viteza oului
+
 bool quit{false};
 bool isGameOver = false;
 float mouseX{-1.0f}, mouseY{-1.0f};
-
+int score = 0;
 float displayScale{1.0f};
+
+void spawnEnemies() {
+    enemies.clear(); // Ștergem inamicii vechi (chiar dacă sunt morți/inactive)
+
+    int rows = 3;
+    int cols = 6;
+
+    // Putem crește numărul de rânduri pe măsură ce avansezi (opțional)
+    // int rows = 3 + (score / 20); // Exemplu: la fiecare 20 puncte, un rând în plus
+
+    float startX = 50.0f;
+    float startY = 50.0f;
+    float gap = 60.0f;
+
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++) {
+            Square enemy;
+            enemy.pos = glm::vec2(startX + j * gap, startY + i * gap);
+            enemy.size = 30.0f;
+            enemy.color = {255, 0, 0, 255};
+            enemy.active = true;
+            enemies.push_back(enemy);
+        }
+    }
+
+    std::cout << "Val nou de inamici!" << std::endl;
+}
+
+// --- LOGICA PENTRU DESENAT SCORUL (Digital Style) ---
+void drawDigit(SDL_Renderer *renderer, int digit, float x, float y, float size) {
+    // Definim cele 7 segmente ale unui ceas digital
+    //  A
+    // F B
+    //  G
+    // E C
+    //  D
+    bool segments[10][7] = {
+        {1, 1, 1, 1, 1, 1, 0}, // 0
+        {0, 1, 1, 0, 0, 0, 0}, // 1
+        {1, 1, 0, 1, 1, 0, 1}, // 2
+        {1, 1, 1, 1, 0, 0, 1}, // 3
+        {0, 1, 1, 0, 0, 1, 1}, // 4
+        {1, 0, 1, 1, 0, 1, 1}, // 5
+        {1, 0, 1, 1, 1, 1, 1}, // 6
+        {1, 1, 1, 0, 0, 0, 0}, // 7
+        {1, 1, 1, 1, 1, 1, 1}, // 8
+        {1, 1, 1, 1, 0, 1, 1} // 9
+    };
+
+    if (digit < 0 || digit > 9) return;
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // Culoare Albă pt Scor
+
+    // Coordonate relative
+    float w = size;
+    float h = size * 2; // Cifrele sunt de 2 ori mai înalte decât late
+
+    // Desenăm segmentele active
+    if (segments[digit][0]) SDL_RenderLine(renderer, x, y, x + w, y); // A (Sus)
+    if (segments[digit][1]) SDL_RenderLine(renderer, x + w, y, x + w, y + h / 2); // B (Sus-Dreapta)
+    if (segments[digit][2]) SDL_RenderLine(renderer, x + w, y + h / 2, x + w, y + h); // C (Jos-Dreapta)
+    if (segments[digit][3]) SDL_RenderLine(renderer, x, y + h, x + w, y + h); // D (Jos)
+    if (segments[digit][4]) SDL_RenderLine(renderer, x, y + h / 2, x, y + h); // E (Jos-Stânga)
+    if (segments[digit][5]) SDL_RenderLine(renderer, x, y, x, y + h / 2); // F (Sus-Stânga)
+    if (segments[digit][6]) SDL_RenderLine(renderer, x, y + h / 2, x + w, y + h / 2); // G (Mijloc)
+}
+
+void drawScore(SDL_Renderer *renderer, int value) {
+    std::string s = std::to_string(value);
+    float digitSize = 15.0f; // Cât de mare e o cifră
+    float spacing = 25.0f; // Spațiu între cifre
+
+    // Calculăm poziția de start (Dreapta Sus)
+    // Plecăm de la margine (WINDOW_WIDTH) și scădem lungimea textului
+    float startX = WINDOW_WIDTH - (s.length() * spacing) - 20.0f;
+    float startY = 20.0f;
+
+    for (char c: s) {
+        int digit = c - '0'; // Conversie char la int
+        drawDigit(renderer, digit, startX, startY, digitSize);
+        startX += spacing;
+    }
+}
 
 bool checkSquareCollision(const Square &a, const Square &b) {
     return (a.pos.x < b.pos.x + b.size &&
@@ -101,23 +191,7 @@ void initGame() {
     player.color = {0, 0, 255, 255}; // Albastru
     player.active = true;
 
-    // 2. Setup Inamici (Grilă de Pătrate Roșii)
-    int rows = 3;
-    int cols = 6;
-    float startX = 50.0f;
-    float startY = 30.0f;
-    float gap = 60.0f; // Distanța dintre ei
-
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            Square enemy;
-            enemy.pos = glm::vec2(startX + j * gap, startY + i * gap);
-            enemy.size = 30.0f; // Rațele sunt pătrate
-            enemy.color = {255, 0, 0, 255}; // Roșu
-            enemy.active = true;
-            enemies.push_back(enemy); // Îl băgăm în listă
-        }
-    }
+    spawnEnemies();
 }
 
 
@@ -128,7 +202,7 @@ void processEvents() {
 
         // TRAGERE (Pe eveniment Key Down, ca să nu tragi "mitralieră" dacă ții apăsat)
         if (event.type == SDL_EVENT_KEY_DOWN) {
-            if (event.key.key == SDLK_SPACE) {
+            if (event.key.key == SDLK_SPACE && !event.key.repeat) {
                 // Creăm un glonț (Cerc)
                 Circle bullet;
                 bullet.radius = 5.0f;
@@ -139,8 +213,13 @@ void processEvents() {
                 bullets.push_back(bullet); // Adăugăm în vector
             } else if (event.key.key == SDLK_R && isGameOver) {
                 // Resetăm variabilele
+                score = 0;
                 enemies.clear(); // Ștergem inamicii vechi
                 bullets.clear(); // Ștergem gloanțele
+                enemyBullets.clear();
+
+                eggTimer = 0.0f;
+
                 isGameOver = false;
 
                 // Re-inițializăm jocul (poziții, inamici noi)
@@ -195,6 +274,7 @@ void update(float dt) {
         for (auto &enemy: enemies) {
             if (enemy.active && checkCollision(bullets[i], enemy)) {
                 enemy.active = false;
+                score++;
                 hit = true;
                 break;
             }
@@ -247,6 +327,70 @@ void update(float dt) {
         // Opțional: Pe măsură ce coboară, devin mai agresivi (mai rapizi)
         ENEMY_MOVE_SPEED += 20.0f;
     }
+
+    // A. Spawm Ouă (Tragere)
+    eggTimer += dt;
+    if (eggTimer >= EGG_SPAWN_TIME) {
+        eggTimer = 0; // Resetăm timerul
+
+        // Găsim toți inamicii vii
+        std::vector<int> livingEnemiesIndices;
+        for (int i = 0; i < enemies.size(); i++) {
+            if (enemies[i].active) {
+                livingEnemiesIndices.push_back(i);
+            }
+        }
+
+        // Dacă mai există inamici, alegem unul random
+        if (!livingEnemiesIndices.empty()) {
+            int randomIndex = livingEnemiesIndices[rand() % livingEnemiesIndices.size()];
+            Square &shooter = enemies[randomIndex];
+
+            // Creăm oul
+            Circle egg;
+            egg.radius = 7.0f; // Puțin mai mare ca gloanțele tale
+            egg.pos = glm::vec2(shooter.pos.x + shooter.size / 2, shooter.pos.y + shooter.size);
+            egg.color = {255, 255, 255, 255}; // Alb (ca un ou)
+
+            enemyBullets.push_back(egg);
+        }
+    }
+
+    // B. Mișcare Ouă și Coliziune cu Jucătorul
+    for (int i = enemyBullets.size() - 1; i >= 0; i--) {
+        enemyBullets[i].pos.y += EGG_SPEED * dt; // Merg în JOS (+)
+
+        // Verificăm coliziunea cu Jucătorul (folosim funcția existentă cerc-pătrat)
+        if (checkCollision(enemyBullets[i], player)) {
+            isGameOver = true;
+            std::cout << "GAME OVER: Te-a lovit un ou!" << std::endl;
+        }
+
+        // Ștergem oul dacă iese din ecran (jos)
+        if (enemyBullets[i].pos.y - enemyBullets[i].radius > WINDOW_HEIGHT) {
+            enemyBullets.erase(enemyBullets.begin() + i);
+        }
+    }
+
+    int activeEnemies = 0;
+    for (const auto &enemy: enemies) {
+        if (enemy.active) {
+            activeEnemies++;
+        }
+    }
+
+    // Dacă nu mai e nimeni viu...
+    if (activeEnemies == 0) {
+        // 1. Facem jocul puțin mai greu
+        ENEMY_MOVE_SPEED += 50.0f; // Cresc viteza
+
+        // 2. Aducem o nouă armată
+        spawnEnemies();
+
+        // 3. Resetăm gloanțele inamice ca să fie corect (să nu te lovească un ou din nivelul trecut)
+        enemyBullets.clear();
+        bullets.clear();
+    }
 }
 
 void drawFrame() {
@@ -270,6 +414,10 @@ void drawFrame() {
         bullet.draw(renderer);
     }
 
+    for (Circle &egg: enemyBullets) {
+        egg.draw(renderer);
+    }
+    drawScore(renderer, score);
     //Update window
     SDL_RenderPresent(renderer);
 }
@@ -292,6 +440,7 @@ void cleanup() {
 }
 
 int main() {
+    srand(time(nullptr));
     backgroundColor = {0, 0, 0, 255}; // Negru
 
     if (!initWindow()) return -1;
